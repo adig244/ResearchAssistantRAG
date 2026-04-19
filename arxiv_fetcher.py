@@ -1,10 +1,12 @@
 import os
 import arxiv
+from config import GLOBAL_CONFIG
 
-def fetch_papers(query: str, max_results: int = 5, download_dir: str = "data/papers"):
+def fetch_papers(query: str, max_results: int = 5):
     """
     Finds and downloads papers from ArXiv, returning a list of metadata dictionaries.
     """
+    download_dir = GLOBAL_CONFIG["PAPER_DOWNLOAD_DIR"]
     os.makedirs(download_dir, exist_ok=True)
     
     print(f"Searching ArXiv for: '{query}'...")
@@ -18,6 +20,11 @@ def fetch_papers(query: str, max_results: int = 5, download_dir: str = "data/pap
     papers_metadata = []
     
     for result in client.results(search):
+        # Sanity Check: Skip broken records
+        if not result.summary or not result.pdf_url:
+            print(f"Skipping broken or placeholder record: {result.title}")
+            continue
+
         arxiv_id = result.get_short_id().replace("/", "_")
         pdf_filename = f"{arxiv_id}.pdf"
         pdf_path = os.path.join(download_dir, pdf_filename)
@@ -26,7 +33,11 @@ def fetch_papers(query: str, max_results: int = 5, download_dir: str = "data/pap
         print(f"Found: {result.title}")
         if not os.path.exists(pdf_path):
             print(f"  Downloading PDF -> {pdf_filename}")
-            result.download_pdf(dirpath=download_dir, filename=pdf_filename)
+            try:
+                result.download_pdf(dirpath=download_dir, filename=pdf_filename)
+            except Exception as e:
+                print(f"  [Error] Failed to download {pdf_filename}. Skipping. Details: {e}")
+                continue # Skip adding partial metadata if download fails
         else:
             print(f"  PDF already in library -> {pdf_filename}")
         
