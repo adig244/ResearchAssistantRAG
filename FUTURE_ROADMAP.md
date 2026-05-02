@@ -16,7 +16,8 @@ This document tracks the long-term vision and planned features for the Research 
 - [ ] **Semantic Chunking**: Use AI to split text based on meaning shifts for better context preservation.
 - [ ] **Master Project Integration**: Seamless merging with the parent "Synthetic Quant" codebase.
 - [ ] **Dedicated Prompt Template**: Implement a customized, Quant-focused prompt template.
-- [ ] **Technical Model Upgrade**: Switch to a higher-dimensionality embedding model (e.g., 1024-dim).
+- [ ] **Technical Model Upgrade**: Switch to a higher-dimensionality embedding model (e.g., 1024-dim). - huggingface/google api or smaller local models.
+- [ ] **Source LaTex files**: Source original LaTex files from arxiv API or https://arxiv.org/pdf/XXXX.XXXXX for parsing and chunking. (or liteparse)
 - [ ] **Multi-Agent Orchestration**: Switching between "News Analyst" and "Paper Researcher" agents.
 
 ## 🛡️ Stability & Safety (New)

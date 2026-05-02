@@ -1,100 +1,49 @@
-import os
-import re
+from typing import Optional
 from llama_index.core import Settings
-from llama_index.core.retrievers import BaseRetriever, QueryFusionRetriever
+from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
-from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter, FilterCondition
-from llama_index.core.schema import NodeWithScore
-from rank_bm25 import BM25Okapi
 
-from config import GLOBAL_CONFIG
+from config import GLOBAL_CONFIG, KEY_IS_SUMMARY
+from retrievers import CustomVectorRetriever, CustomBM25Retriever, LinearTwoStageRetriever
+from vector_db import get_collection, get_summary_nodes
 
-class CustomBM25Retriever(BaseRetriever):
-    """A lightweight BM25 retriever built directly on rank-bm25."""
-    def __init__(self, nodes, similarity_top_k=5):
-        self._nodes = nodes
-        self._similarity_top_k = similarity_top_k
-        corpus = [self._tokenize(node.get_content()) for node in nodes]
-        self._bm25 = BM25Okapi(corpus)
-        super().__init__()
+def _build_bm25_retriever(similarity_top_k: int) -> Optional[CustomBM25Retriever]:
+    """Initializes the BM25 retriever using nodes from the storage layer."""
+    abstract_nodes = get_summary_nodes()
+    if not abstract_nodes:
+        return None
+    return CustomBM25Retriever(abstract_nodes, similarity_top_k=similarity_top_k)
 
-    def _tokenize(self, text):
-        return re.findall(r"\w+", text.lower())
-
-    def _retrieve(self, query_bundle):
-        query_tokens = self._tokenize(query_bundle.query_str)
-        scores = self._bm25.get_scores(query_tokens)
-        node_scores = [
-            NodeWithScore(node=self._nodes[idx], score=float(score))
-            for idx, score in enumerate(scores)
-        ]
-        node_scores.sort(key=lambda x: x.score, reverse=True)
-        return node_scores[:self._similarity_top_k]
-
-class LinearTwoStageRetriever(BaseRetriever):
-    """Linear, two-stage retriever: Search abstracts -> Extract IDs -> SearchChunks."""
-    def __init__(self, index, abstract_retriever, similarity_top_k=5):
-        self._index = index
-        self._abstract_retriever = abstract_retriever
-        self._similarity_top_k = similarity_top_k
-        super().__init__()
-
-    def _retrieve(self, query_bundle):
-        # 1. Search Phase 1: Abstracts (Surface)
-        abstract_results = self._abstract_retriever.retrieve(query_bundle)
-        arxiv_ids = list(set(node.node.metadata.get("arxiv_id") for node in abstract_results))
-        
-        if not arxiv_ids:
-            return []
-
-        # 2. Search Phase 2: Targeted Chunks (Deep)
-        # Build OR filter to search chunks from ALL found papers simultaneously
-        filters = MetadataFilters(
-            filters=[ExactMatchFilter(key="parent_id", value=aid) for aid in arxiv_ids],
-            condition=FilterCondition.OR
-        )
-        
-        # We perform a targeted vector search on just those specific papers
-        chunk_retriever = self._index.as_retriever(
-            similarity_top_k=self._similarity_top_k, 
-            filters=filters
-        )
-        return chunk_retriever.retrieve(query_bundle)
-
-def create_query_engine(index, year_filter=None, author_filter=None):
-    """Creates a high-performance linear two-stage query engine."""
-    
-    # 1. Global Filters (Phase 1)
-    filters = []
+def create_query_engine(index, year_filter: Optional[str] = None, author_filter: Optional[str] = None):
+    """
+    Orchestrates the Hybrid Linear Two-Stage Query Engine.
+    """
+    # 1. Define metadata filters for abstracts
+    where_dict = {KEY_IS_SUMMARY: True}
     if year_filter:
-        filters.append(ExactMatchFilter(key="year", value=str(year_filter)))
+        where_dict["year"] = str(year_filter)
     if author_filter:
-        filters.append(ExactMatchFilter(key="authors", value=author_filter))
-    metadata_filters = MetadataFilters(filters=filters) if filters else None
+        where_dict["authors"] = author_filter
+        
+    if len(where_dict) > 1:
+        where_dict = {"$and": [{k: v} for k, v in where_dict.items()]}
 
-    # 2. Setup Vector Retriever (on abstracts)
-    vector_retriever = index.as_retriever(
+    collection = get_collection()
+    
+    # 2. Build Base Retrievers (Vector and BM25)
+    vector_retriever = CustomVectorRetriever(
+        collection=collection,
         similarity_top_k=GLOBAL_CONFIG["PHASE_1_TOP_K"], 
-        filters=metadata_filters
+        embed_model=Settings.embed_model,
+        where=where_dict
     )
 
-    # 3. Setup Custom BM25 Retriever (on abstracts)
-    # Since we use Chroma-Only lean storage (no docstore), we query the DB directly
-    abstract_nodes = []
-    try:
-        from llama_index.core.schema import TextNode
-        collection = index.vector_store._collection
-        results = collection.get(where={"is_summary": True}, include=["documents", "metadatas"])
-        if results and results["documents"]:
-            for doc, meta in zip(results["documents"], results["metadatas"]):
-                abstract_nodes.append(TextNode(text=doc, metadata=meta))
-    except Exception as e:
-        print(f"  [Warning] Failed to load abstracts for BM25: {e}")
+    bm25_retriever = _build_bm25_retriever(GLOBAL_CONFIG["PHASE_1_TOP_K"])
     
-    if not abstract_nodes:
+    # 3. Fuse them if BM25 is available
+    if not bm25_retriever:
         base_retriever = vector_retriever
     else:
-        bm25_retriever = CustomBM25Retriever(abstract_nodes, similarity_top_k=GLOBAL_CONFIG["PHASE_1_TOP_K"])
         base_retriever = QueryFusionRetriever(
             [vector_retriever, bm25_retriever],
             retriever_weights=[GLOBAL_CONFIG["VECTOR_WEIGHT"], GLOBAL_CONFIG["BM25_WEIGHT"]],
@@ -103,8 +52,11 @@ def create_query_engine(index, year_filter=None, author_filter=None):
             mode="reciprocal_rerank",
             use_async=False
         )
+        # HACK: Override node resolution to avoid redundant docstore lookups in the lean index.
+        # See LlamaIndex issue #11603 for context on hybrid lean storage.
+        base_retriever._resolve_nodes = lambda nodes: nodes
 
-    # 4. The Linear Orchestrator (No Dictionary, No Recursion)
+    # 4. Wrap in the Two-Stage logic
     linear_retriever = LinearTwoStageRetriever(
         index, 
         base_retriever, 

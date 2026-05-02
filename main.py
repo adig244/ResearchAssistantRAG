@@ -1,12 +1,8 @@
 import argparse
 import sys
-from dotenv import load_dotenv
 
 from config import configure_base_settings
 from pipeline_runner import run_ingestion_pipeline, run_query_pipeline
-
-# Load environment variables
-load_dotenv()
 
 def main():
     parser = argparse.ArgumentParser(description="ArXiv RAG Research Assistant - Turbo")
@@ -24,7 +20,6 @@ def main():
     
     # 2. Route to Pipelines
     if args.build_brain or args.query:
-        # User is either using batch builder or standard query fetch builder
         topic_str = args.build_brain if args.build_brain else args.query
         topics = [t.strip() for t in topic_str.split(",")]
         run_ingestion_pipeline(topics, max_papers=args.max_papers)
@@ -32,10 +27,9 @@ def main():
     if args.ask:
         run_query_pipeline(args.ask, year=args.year, author=args.author)
         
-    elif not (args.query or args.build_brain):
+    if not (args.query or args.build_brain or args.ask):
         print("\nArXiv RAG Research Assistant - Turbo")
         print("Usage: python3 main.py --build-brain 'ml' --ask 'what is X?'")
 
 if __name__ == "__main__":
     main()
-

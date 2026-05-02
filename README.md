@@ -1,58 +1,86 @@
-# 🧠 ArXiv RAG Research Assistant
+# ArXiv RAG Research Assistant - Turbo
 
-A high-performance, modular RAG (Retrieval-Augmented Generation) system for Quantitative Finance. It transforms ArXiv research papers into a persistent, searchable "Synthetic Brain" using a two-tier hierarchical search architecture.
+A high-performance Research Assistant that utilizes Retrieval-Augmented Generation (RAG) to analyze ArXiv papers. It features a hierarchical indexing strategy and a two-stage hybrid retrieval engine.
 
 ## 🚀 Key Features
 
-- **Two-Tier Search**: Uses a `RecursiveRetriever` to scan paper **Abstracts** first, then "zooms in" to only the most relevant **Page Segments**.
-- **Persistent Brain**: Built on **ChromaDB**. Your library is indexed once and searchable forever across sessions.
-- **Intelligent Deduplication**: Automatically avoids indexing the same paper twice using unique ArXiv IDs and content hashing.
-- **Metadata Filtering**: Native support for manual CLI filters (e.g., `--year`, `--author`) to target specific research.
-- **Fully Local & Private**: Runs on your hardware using **Ollama** and **HuggingFace** embeddings.
+*   **Hierarchical Search Index**: Abstracts are indexed as "Summary Nodes" for high-level targeting, while full-text papers are chunked and linked to their respective summaries.
+*   **Two-Stage Hybrid Retrieval**:
+    *   **Phase 1**: Hybrid Vector + BM25 search on abstracts to identify relevant papers.
+    *   **Phase 2**: Deep vector search within identified papers to extract precise chunks.
+*   **Multi-Mode Embedding Engine**: Supports local execution (Sentence Transformers), Hugging Face Inference API, Google AI Studio (Gemini), and Ollama-based embeddings.
+*   **Local LLM Integration**: Uses Ollama for local inference (defaulting to gpt-oss:120b-cloud).
+*   **Optimized for Long Context**: Configured with an 8192-token context window for Jina v2 models to prevent silent truncation.
+*   **Persistent Vector Storage**: Powered by ChromaDB with an optimized "Lean" storage context (metadata mapping only).
 
-## 🛠 Project Structure
+## 🛠️ Installation
 
-- `main.py`: CLI Orchestrator for brain-building and querying.
-- `arxiv_fetcher.py`: Handles paper discovery and PDF downloads.
-- `document_processor.py`: Implements the hierarchical node structure (Abstract -> Chunks).
-- `vector_db.py`: Manages persistent storage and indexing in ChromaDB.
-- `rag_agent.py`: The intelligence layer (RecursiveRetriever + LLM synthesis).
+1.  **Clone the repository**:
+    ```bash
+    git clone <repository-url>
+    cd rag_project
+    ```
 
-## 📦 Setup & Installation
+2.  **Set up a virtual environment**:
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    ```
 
-1. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+3.  **Install dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-2. **Setup Ollama**:
-   Ensure [Ollama](https://ollama.ai/) is running and you have the required model pulled:
-   ```bash
-   ollama pull gpt-oss:120b-cloud  # or your preferred model
-   ```
+4.  **Configure Environment**:
+    Create a `.env` file based on `.env.example`:
+    ```bash
+    cp .env.example .env
+    # Add your GOOGLE_API_KEY or HF_TOKEN if using API modes
+    ```
 
-3. **Configure Environment**:
-   Copy `.env.example` to `.env` and fill in your settings.
+## 📖 Usage
 
-## 🏃 Usage
-
-### 1. Build your "Synthetic Brain"
-Ingest papers on specific topics to populate your local library:
+### 1. Build the Research Brain
+Ingest papers on specific topics to populate your local database:
 ```bash
-python3 main.py --build-brain "hft, limit order books" --max_papers 5
+python3 main.py --build-brain "delta hedging, stochastic volatility" --max_papers 10
 ```
 
-### 2. Ask a Research Question
-Query your library with the hierarchical search engine:
+### 2. Search and Download
+Search ArXiv and download new papers:
 ```bash
-python3 main.py --ask "What are the common feature selection methods for HFT?"
+python3 main.py --query "transformer architectures" --max_papers 5
 ```
 
-### 3. Filtered Search
-Target specific years or authors:
+### 3. Ask Questions
+Query your research brain:
 ```bash
-python3 main.py --ask "Latest trends in volatility" --year 2024 --author "M. Smith"
+python3 main.py --ask "What is the difference between continuous and discrete delta hedging?"
 ```
 
-## 🛡 License
-MIT
+### 4. Advanced Filters
+Filter queries by year or author:
+```bash
+python3 main.py --ask "recent advances in LLMs" --year "2024"
+```
+
+## ⚙️ Configuration
+
+All parameters are centralized in `config.py`:
+*   `EMBEDDING_MODE`: "local", "hf", "google", or "ollama".
+*   `CHUNK_SIZE`: Default 2048 tokens.
+*   `PHASE_1_TOP_K`: Number of papers to identify in the first pass.
+*   `PHASE_2_TOP_K`: Number of deep chunks to retrieve for final synthesis.
+
+## 📂 Project Structure
+
+*   `main.py`: CLI Entrypoint.
+*   `pipeline_runner.py`: Orchestrates ingestion and query workflows.
+*   `arxiv_fetcher.py`: ArXiv API integration and parallel PDF downloader.
+*   `document_processor.py`: Handles PDF parsing, chunking, and hierarchical node creation.
+*   `retrievers.py`: Custom hybrid (Vector + BM25) and two-stage retrieval logic.
+*   `vector_db.py`: ChromaDB management and "Lean" storage implementation.
+*   `embeddings.py`: Flexible embedding client (Local, HF, Google, Ollama).
+*   `rag_agent.py`: Final query engine construction.
+*   `config.py`: Centralized parameters and environment setup.
